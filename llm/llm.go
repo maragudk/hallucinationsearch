@@ -1,4 +1,4 @@
-// Package llm wraps [maragu.dev/gai]'s Anthropic client for generating fabricated
+// Package llm wraps [maragu.dev/gai]'s Google client for generating fabricated
 // search results and fabricated destination websites.
 package llm
 
@@ -13,15 +13,15 @@ import (
 
 	"google.golang.org/genai"
 	"maragu.dev/gai"
-	"maragu.dev/gai/clients/anthropic"
 	"maragu.dev/gai/clients/google"
 	"maragu.dev/gai/robust"
 )
 
-// HaikuModel is the Anthropic model used for both result fabrication and website fabrication.
-// Haiku is cheap and fast enough to keep the 10 parallel result jobs and the blocking
-// /site request comfortably under the 2 minute handler budget.
-const HaikuModel = anthropic.ChatCompleteModelClaudeHaiku4_5Latest
+// ChatModel is the Google Gemini model used for result, website, ad, and
+// ad-website fabrication. Gemini 3 Flash Preview is fast and cheap enough to
+// keep the 10 parallel result jobs and the blocking /site request comfortably
+// under the 2 minute handler budget.
+const ChatModel = google.ChatCompleteModel("gemini-3-flash-preview")
 
 // NanoBananaModel is the Google Gemini image-generation model used to fabricate
 // inline images for the generated destination websites. v2 flash gives better
@@ -33,8 +33,8 @@ const NanoBananaModel = "gemini-3.1-flash-image-preview"
 const imageTimeout = 60 * time.Second
 
 // Client wraps gai chat-completers for results, ads, and both their destination
-// websites (all Haiku), plus the raw Google genai client used for image
-// generation via Nano Banana.
+// websites (all Gemini 3 Flash Preview), plus the raw Google genai client used
+// for image generation via Nano Banana.
 type Client struct {
 	log         *slog.Logger
 	resultCC    gai.ChatCompleter
@@ -45,9 +45,8 @@ type Client struct {
 }
 
 type NewClientOptions struct {
-	// Key is the Anthropic API key used for all chat completions.
-	Key string
-	// GoogleKey is the Google Gemini API key used for Nano Banana image generation.
+	// GoogleKey is the Google Gemini API key used for both chat completions
+	// and Nano Banana image generation.
 	GoogleKey string
 	Log       *slog.Logger
 }
@@ -57,7 +56,7 @@ func NewClient(opts NewClientOptions) *Client {
 		opts.Log = slog.New(slog.DiscardHandler)
 	}
 
-	c := anthropic.NewClient(anthropic.NewClientOptions{Key: opts.Key, Log: opts.Log})
+	gc := google.NewClient(google.NewClientOptions{Key: opts.GoogleKey, Log: opts.Log})
 
 	wrap := func(inner gai.ChatCompleter) gai.ChatCompleter {
 		return robust.NewChatCompleter(robust.NewChatCompleterOptions{
@@ -66,14 +65,12 @@ func NewClient(opts NewClientOptions) *Client {
 		})
 	}
 
-	gc := google.NewClient(google.NewClientOptions{Key: opts.GoogleKey, Log: opts.Log})
-
 	return &Client{
 		log:         opts.Log,
-		resultCC:    wrap(c.NewChatCompleter(anthropic.NewChatCompleterOptions{Model: HaikuModel})),
-		websiteCC:   wrap(c.NewChatCompleter(anthropic.NewChatCompleterOptions{Model: HaikuModel})),
-		adCC:        wrap(c.NewChatCompleter(anthropic.NewChatCompleterOptions{Model: HaikuModel})),
-		adWebsiteCC: wrap(c.NewChatCompleter(anthropic.NewChatCompleterOptions{Model: HaikuModel})),
+		resultCC:    wrap(gc.NewChatCompleter(google.NewChatCompleterOptions{Model: ChatModel})),
+		websiteCC:   wrap(gc.NewChatCompleter(google.NewChatCompleterOptions{Model: ChatModel})),
+		adCC:        wrap(gc.NewChatCompleter(google.NewChatCompleterOptions{Model: ChatModel})),
+		adWebsiteCC: wrap(gc.NewChatCompleter(google.NewChatCompleterOptions{Model: ChatModel})),
 		google:      gc,
 	}
 }
