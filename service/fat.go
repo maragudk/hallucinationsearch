@@ -34,6 +34,12 @@ func (f *Fat) DB() *sqlite.Database {
 	return f.db
 }
 
+// LLM returns the underlying [llm.Client] for model calls that bypass
+// the jobs queue (e.g. the synchronous /image handler).
+func (f *Fat) LLM() *llm.Client {
+	return f.llm
+}
+
 // Queue returns the jobs queue for enqueueing new work.
 func (f *Fat) Queue() *goqite.Queue {
 	return f.queue

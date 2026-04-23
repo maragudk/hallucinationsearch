@@ -41,6 +41,8 @@ type searchDB interface {
 	GetAds(ctx context.Context, id model.QueryID) ([]model.Ad, error)
 	GetAd(ctx context.Context, id model.AdID) (model.Ad, error)
 	GetAdWebsite(ctx context.Context, id model.AdID) (model.AdWebsite, error)
+	GetImage(ctx context.Context, pathHash string) (model.Image, error)
+	InsertImage(ctx context.Context, img model.Image) error
 }
 
 type queueAccessor interface {
@@ -61,9 +63,10 @@ func (s searchServiceAdapter) Queue() *goqite.Queue {
 	return s.queue
 }
 
-// Search wires up the three search-related routes: the homepage / results page,
-// the Datastar SSE signal stream, and the blocking fabricated-site renderer.
-func Search(r *Router, log *slog.Logger, svc searchService) {
+// Search wires up the search-related routes: the homepage / results page,
+// the Datastar SSE signal stream, the blocking fabricated-site renderer,
+// and the on-demand Nano Banana image endpoint.
+func Search(r *Router, log *slog.Logger, svc searchService, gen imageGenerator) {
 	r.Get("/", func(props html.PageProps) (Node, error) {
 		ctx := props.Ctx
 		raw := props.R.URL.Query().Get("q")
@@ -124,6 +127,8 @@ func Search(r *Router, log *slog.Logger, svc searchService) {
 	r.Mux.Get("/events", handleEvents(log, svc))
 	r.Mux.Get("/site/{slug}", handleSite(log, svc))
 	r.Mux.Get("/ad/{slug}", handleAd(log, svc))
+	// chi's wildcard so multi-segment paths like /image/a/b/c are allowed.
+	r.Mux.Get("/image/*", handleImage(log, svc, gen))
 }
 
 // enqueueGenerateResults always enqueues a results job as a safety net -- the handler
