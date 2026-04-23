@@ -24,9 +24,10 @@ import (
 const HaikuModel = anthropic.ChatCompleteModelClaudeHaiku4_5Latest
 
 // NanoBananaModel is the Google Gemini image-generation model used to fabricate
-// inline images for the generated destination websites. "v1 flash" is cheap
-// and fast enough for on-demand first-view generation.
-const NanoBananaModel = "gemini-2.5-flash-image"
+// inline images for the generated destination websites. v2 flash gives better
+// quality and aspect-ratio handling than v1 at comparable latency, which is
+// important for images the user actually sees rendered inside fabricated pages.
+const NanoBananaModel = "gemini-3.1-flash-image-preview"
 
 // imageTimeout caps how long a single Nano Banana generation call may run.
 const imageTimeout = 60 * time.Second

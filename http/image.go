@@ -23,9 +23,6 @@ const (
 	// (the prompt is the cache key -- regenerating with the same prompt yields
 	// a new image, but the browser is free to cache the current bytes forever).
 	imageCacheControl = "public, max-age=31536000, immutable"
-	// imageContentType is the sole Content-Type the /image endpoint serves.
-	// Nano Banana returns PNG by default; browsers sniff-correct anything else.
-	imageContentType = "image/png"
 )
 
 // imageStore is the narrow filesystem-backed cache interface the image handler needs.
@@ -81,6 +78,7 @@ func handleImage(log *slog.Logger, store imageStore, gen imageGenerator) http.Ha
 			span.SetAttributes(
 				attribute.Bool("image.cached", true),
 				attribute.Int("image.bytes", len(data)),
+				attribute.String("image.mime", sniffImageMime(data)),
 			)
 			writeImage(w, data)
 			return
@@ -103,15 +101,36 @@ func handleImage(log *slog.Logger, store imageStore, gen imageGenerator) http.Ha
 		span.SetAttributes(
 			attribute.Bool("image.cached", false),
 			attribute.Int("image.bytes", len(data)),
+			attribute.String("image.mime", sniffImageMime(data)),
 		)
 		writeImage(w, data)
 	}
 }
 
 func writeImage(w http.ResponseWriter, data []byte) {
-	w.Header().Set("Content-Type", imageContentType)
+	w.Header().Set("Content-Type", sniffImageMime(data))
 	w.Header().Set("Cache-Control", imageCacheControl)
 	_, _ = w.Write(data)
+}
+
+// sniffImageMime returns the Content-Type for the given image bytes by looking
+// at the leading magic bytes. Nano Banana v1 returns PNG, v2 returns JPEG; we
+// label each correctly so downloads and strict user-agents see a sensible
+// Content-Type. Unknown shapes fall back to image/png and let the browser
+// sniff-correct.
+func sniffImageMime(data []byte) string {
+	if len(data) >= 8 && data[0] == 0x89 && data[1] == 0x50 && data[2] == 0x4E && data[3] == 0x47 &&
+		data[4] == 0x0D && data[5] == 0x0A && data[6] == 0x1A && data[7] == 0x0A {
+		return "image/png"
+	}
+	if len(data) >= 3 && data[0] == 0xFF && data[1] == 0xD8 && data[2] == 0xFF {
+		return "image/jpeg"
+	}
+	if len(data) >= 12 && data[0] == 'R' && data[1] == 'I' && data[2] == 'F' && data[3] == 'F' &&
+		data[8] == 'W' && data[9] == 'E' && data[10] == 'B' && data[11] == 'P' {
+		return "image/webp"
+	}
+	return "image/png"
 }
 
 // imagePathToPrompt URL-decodes the raw /image/ path, normalises it into a

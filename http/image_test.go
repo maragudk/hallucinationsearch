@@ -100,3 +100,47 @@ func TestImagePathToPrompt(t *testing.T) {
 		})
 	}
 }
+
+func TestSniffImageMime(t *testing.T) {
+	cases := []struct {
+		name string
+		in   []byte
+		want string
+	}{
+		{
+			name: "PNG magic",
+			in:   []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00},
+			want: "image/png",
+		},
+		{
+			name: "JPEG magic (Nano Banana v2)",
+			in:   []byte{0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 'J', 'F', 'I', 'F'},
+			want: "image/jpeg",
+		},
+		{
+			name: "WebP magic",
+			in:   []byte{'R', 'I', 'F', 'F', 0x00, 0x00, 0x00, 0x00, 'W', 'E', 'B', 'P'},
+			want: "image/webp",
+		},
+		{
+			name: "unknown bytes fall back to image/png",
+			in:   []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c},
+			want: "image/png",
+		},
+		{
+			name: "empty falls back to image/png",
+			in:   nil,
+			want: "image/png",
+		},
+		{
+			name: "too short for PNG magic falls back",
+			in:   []byte{0x89, 0x50, 0x4E, 0x47},
+			want: "image/png",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			is.Equal(t, tc.want, sniffImageMime(tc.in))
+		})
+	}
+}
