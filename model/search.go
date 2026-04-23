@@ -11,6 +11,9 @@ type QueryID string
 // ResultID is the primary key type for a search result row.
 type ResultID string
 
+// AdID is the primary key type for a fabricated ad row.
+type AdID string
+
 // Query is a normalised search query, representing one row in the queries table.
 type Query struct {
 	ID      QueryID
@@ -39,6 +42,31 @@ type Website struct {
 	Created  Time
 	Updated  Time
 	HTML     string
+}
+
+// Ad is a single fabricated sponsored result for a query.
+// Position is 0-2 and unique per query. Parallel to [Result], but with a sponsor
+// name and call-to-action, and camouflaged "Ad" label in the UI.
+type Ad struct {
+	ID          AdID
+	Created     Time
+	Updated     Time
+	QueryID     QueryID `db:"query_id"`
+	Position    int
+	Title       string
+	DisplayURL  string `db:"display_url"`
+	Description string
+	Sponsor     string
+	CTA         string `db:"cta"`
+}
+
+// AdWebsite is a fabricated destination page for an ad.
+// The ad_id is both the primary key and the foreign key to ads.id.
+type AdWebsite struct {
+	AdID    AdID `db:"ad_id"`
+	Created Time
+	Updated Time
+	HTML    string
 }
 
 // NormalizeQuery trims, lowercases, and collapses internal whitespace in q to single spaces.

@@ -7,9 +7,12 @@ func (j JobName) String() string {
 }
 
 const (
-	JobNameGenerateResults JobName = "generate-results"
-	JobNameGenerateResult  JobName = "generate-result"
-	JobNameGenerateWebsite JobName = "generate-website"
+	JobNameGenerateResults   JobName = "generate-results"
+	JobNameGenerateResult    JobName = "generate-result"
+	JobNameGenerateWebsite   JobName = "generate-website"
+	JobNameGenerateAds       JobName = "generate-ads"
+	JobNameGenerateAd        JobName = "generate-ad"
+	JobNameGenerateAdWebsite JobName = "generate-ad-website"
 )
 
 // GenerateResultsJobData is the payload for the [JobNameGenerateResults] job, which
@@ -29,4 +32,23 @@ type GenerateResultJobData struct {
 // fabricates a full HTML document for a single result.
 type GenerateWebsiteJobData struct {
 	ResultID ResultID
+}
+
+// GenerateAdsJobData is the payload for the [JobNameGenerateAds] job, which
+// fans out one [JobNameGenerateAd] job per missing ad position.
+type GenerateAdsJobData struct {
+	QueryID QueryID
+}
+
+// GenerateAdJobData is the payload for the [JobNameGenerateAd] job, which
+// fabricates a single ad at the given position for the given query.
+type GenerateAdJobData struct {
+	QueryID  QueryID
+	Position int
+}
+
+// GenerateAdWebsiteJobData is the payload for the [JobNameGenerateAdWebsite] job, which
+// fabricates a full HTML document for a single ad.
+type GenerateAdWebsiteJobData struct {
+	AdID AdID
 }
