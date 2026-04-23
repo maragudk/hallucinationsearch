@@ -72,16 +72,17 @@ func GenerateAds(log *slog.Logger, db generateAdsDB, queue *goqite.Queue) jobs.F
 
 type generateAdDB interface {
 	GetQuery(ctx context.Context, id model.QueryID) (model.Query, error)
-	GetAds(ctx context.Context, id model.QueryID) ([]model.Ad, error)
 	InsertAd(ctx context.Context, a model.Ad) error
 }
 
 type adGenerator interface {
-	GenerateAd(ctx context.Context, query string, position int, existingSponsors []string) (llm.Ad, error)
+	GenerateAd(ctx context.Context, query string, position int) (llm.Ad, error)
 }
 
 // GenerateAd fabricates a single ad for a query and position and inserts it.
 // The insert uses on-conflict-do-nothing so concurrent runs of the same position are harmless.
+// Per-call randomization inside the LLM layer (product category / pitch angle / weirdness)
+// replaces the old "avoid already-used sponsors" dedup, which was defeated by parallel fan-out.
 func GenerateAd(log *slog.Logger, db generateAdDB, gen adGenerator, _ *goqite.Queue) jobs.Func {
 	return jobs.WithTracing("jobs.GenerateAd", func(ctx context.Context, m []byte) error {
 		var jd model.GenerateAdJobData
@@ -99,22 +100,12 @@ func GenerateAd(log *slog.Logger, db generateAdDB, gen adGenerator, _ *goqite.Qu
 			return err
 		}
 
-		// Collect sponsors already produced so the model picks a distinct brand.
-		existing, err := db.GetAds(ctx, q.ID)
-		if err != nil {
-			return err
-		}
-		sponsors := make([]string, 0, len(existing))
-		for _, a := range existing {
-			sponsors = append(sponsors, a.Sponsor)
-		}
-
 		log.Info("Fabricating ad", "query", q.Text, "position", jd.Position)
 
 		llmCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 		defer cancel()
 
-		a, err := gen.GenerateAd(llmCtx, q.Text, jd.Position, sponsors)
+		a, err := gen.GenerateAd(llmCtx, q.Text, jd.Position)
 		if err != nil {
 			log.Error("Error fabricating ad", "error", err, "query", q.Text, "position", jd.Position)
 			return err
