@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -15,13 +14,11 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
-
-	"app/model"
 )
 
 const (
 	// imagePathMaxBytes caps the raw URL-path length for /image/... so a truncated
-	// or hostile caller cannot blow the prompt token budget or the SQLite column.
+	// or hostile caller cannot blow the prompt token budget.
 	imagePathMaxBytes = 1024
 	// imageGenTimeout is the total budget for a single cache-miss generation,
 	// including the model call. The llm.Client enforces its own 60s internal
@@ -32,28 +29,31 @@ const (
 	// (the prompt is the cache key -- regenerating with the same prompt yields
 	// a new image, but the browser is free to cache the current bytes forever).
 	imageCacheControl = "public, max-age=31536000, immutable"
+	// imageContentType is the sole Content-Type the /image endpoint serves.
+	// Nano Banana returns PNG by default; browsers sniff-correct anything else.
+	imageContentType = "image/png"
 )
 
-// imageService is the narrow persistence interface the image handler needs.
-type imageService interface {
-	GetImage(ctx context.Context, pathHash string) (model.Image, error)
-	InsertImage(ctx context.Context, img model.Image) error
+// imageStore is the narrow filesystem-backed cache interface the image handler needs.
+type imageStore interface {
+	Get(hash string) ([]byte, bool, error)
+	Put(hash string, data []byte) error
 }
 
 // imageGenerator is the narrow LLM interface the image handler needs.
 type imageGenerator interface {
-	Image(ctx context.Context, prompt string) ([]byte, string, error)
+	Image(ctx context.Context, prompt string) ([]byte, error)
 }
 
 // handleImage serves on-demand generated images for the fabricated destination
 // pages. The URL path after `/image/` is URL-decoded, normalised to a prompt,
 // and hashed to produce the cache key. On cache miss, the handler calls
-// Nano Banana inline, stores the bytes in SQLite, and returns them.
+// Nano Banana inline, stores the bytes on disk, and returns them.
 //
-// Concurrent duplicate requests are harmless: both callers generate, one wins
-// the `on conflict (path_hash) do nothing` insert, the other's bytes are
-// discarded (but still served to that caller).
-func handleImage(log *slog.Logger, svc imageService, gen imageGenerator) http.HandlerFunc {
+// Concurrent duplicate requests are harmless: both callers generate, both
+// rename their temp file onto the final path (os.Rename silently overwrites),
+// and both serve their own bytes to their caller.
+func handleImage(log *slog.Logger, store imageStore, gen imageGenerator) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		span := trace.SpanFromContext(ctx)
@@ -77,51 +77,46 @@ func handleImage(log *slog.Logger, svc imageService, gen imageGenerator) http.Ha
 		pathHash := hex.EncodeToString(sum[:])
 		span.SetAttributes(attribute.String("image.path_hash", pathHash))
 
-		if img, err := svc.GetImage(ctx, pathHash); err == nil {
-			span.SetAttributes(
-				attribute.Bool("image.cached", true),
-				attribute.Int("image.bytes", len(img.Data)),
-				attribute.String("image.mime", img.MimeType),
-			)
-			writeImage(w, img.MimeType, img.Data)
-			return
-		} else if !errors.Is(err, model.ErrorImageNotFound) {
+		data, found, err := store.Get(pathHash)
+		if err != nil {
 			log.Error("Error getting image", "error", err, "path_hash", pathHash)
 			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		if found {
+			span.SetAttributes(
+				attribute.Bool("image.cached", true),
+				attribute.Int("image.bytes", len(data)),
+			)
+			writeImage(w, data)
 			return
 		}
 
 		genCtx, cancel := context.WithTimeout(ctx, imageGenTimeout)
 		defer cancel()
 
-		data, mime, err := gen.Image(genCtx, prompt)
+		data, err = gen.Image(genCtx, prompt)
 		if err != nil {
 			log.Error("Error generating image", "error", err, "prompt", prompt)
 			http.Error(w, "image generation failed", http.StatusBadGateway)
 			return
 		}
 
-		if err := svc.InsertImage(ctx, model.Image{
-			PathHash: pathHash,
-			Path:     prompt,
-			MimeType: mime,
-			Data:     data,
-		}); err != nil {
+		if err := store.Put(pathHash, data); err != nil {
 			// Cache write failed, but we have valid bytes; serve them and move on.
-			log.Error("Error inserting image", "error", err, "path_hash", pathHash)
+			log.Error("Error storing image", "error", err, "path_hash", pathHash)
 		}
 
 		span.SetAttributes(
 			attribute.Bool("image.cached", false),
 			attribute.Int("image.bytes", len(data)),
-			attribute.String("image.mime", mime),
 		)
-		writeImage(w, mime, data)
+		writeImage(w, data)
 	}
 }
 
-func writeImage(w http.ResponseWriter, mime string, data []byte) {
-	w.Header().Set("Content-Type", mime)
+func writeImage(w http.ResponseWriter, data []byte) {
+	w.Header().Set("Content-Type", imageContentType)
 	w.Header().Set("Cache-Control", imageCacheControl)
 	_, _ = w.Write(data)
 }

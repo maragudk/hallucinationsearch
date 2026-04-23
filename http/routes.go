@@ -11,7 +11,7 @@ import (
 func InjectHTTPRouter(log *slog.Logger, svc *service.Fat) func(*Router) {
 	return func(r *Router) {
 		r.Group(func(r *http.Router) {
-			Search(r, log, searchServiceAdapter{searchDB: svc.DB(), queue: svc.Queue()}, svc.LLM())
+			Search(r, log, searchServiceAdapter{searchDB: svc.DB(), queue: svc.Queue()}, svc.ImageStore(), svc.LLM())
 		})
 	}
 }

@@ -6,5 +6,4 @@ const (
 	ErrorWebsiteNotFound   = Error("website not found")
 	ErrorAdNotFound        = Error("ad not found")
 	ErrorAdWebsiteNotFound = Error("ad website not found")
-	ErrorImageNotFound     = Error("image not found")
 )

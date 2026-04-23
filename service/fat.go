@@ -10,22 +10,25 @@ import (
 )
 
 type Fat struct {
-	db    *sqlite.Database
-	llm   *llm.Client
-	queue *goqite.Queue
+	db         *sqlite.Database
+	llm        *llm.Client
+	queue      *goqite.Queue
+	imageStore *llm.ImageStore
 }
 
 type NewFatOptions struct {
-	Database *sqlite.Database
-	LLM      *llm.Client
-	Queue    *goqite.Queue
+	Database   *sqlite.Database
+	LLM        *llm.Client
+	Queue      *goqite.Queue
+	ImageStore *llm.ImageStore
 }
 
 func NewFat(opts NewFatOptions) *Fat {
 	return &Fat{
-		db:    opts.Database,
-		llm:   opts.LLM,
-		queue: opts.Queue,
+		db:         opts.Database,
+		llm:        opts.LLM,
+		queue:      opts.Queue,
+		imageStore: opts.ImageStore,
 	}
 }
 
@@ -43,4 +46,9 @@ func (f *Fat) LLM() *llm.Client {
 // Queue returns the jobs queue for enqueueing new work.
 func (f *Fat) Queue() *goqite.Queue {
 	return f.queue
+}
+
+// ImageStore returns the filesystem-backed image cache.
+func (f *Fat) ImageStore() *llm.ImageStore {
+	return f.imageStore
 }

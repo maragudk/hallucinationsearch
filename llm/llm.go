@@ -326,46 +326,31 @@ func (c *Client) GenerateAdWebsite(ctx context.Context, query, title, displayURL
 }
 
 // Image generates a single fabricated image for the given prompt via Nano Banana.
-// Returns the raw bytes plus the sniffed mime type ("image/png" or "image/jpeg",
-// defaulting to "image/png"). The call is capped at [imageTimeout].
-func (c *Client) Image(ctx context.Context, prompt string) ([]byte, string, error) {
+// Returns the raw image bytes. Nano Banana returns PNG by default; the caller
+// always serves them as image/png. The call is capped at [imageTimeout].
+func (c *Client) Image(ctx context.Context, prompt string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, imageTimeout)
 	defer cancel()
 
 	resp, err := c.google.Client.Models.GenerateContent(ctx, NanoBananaModel, genai.Text(prompt), nil)
 	if err != nil {
-		return nil, "", fmt.Errorf("generate content: %w", err)
+		return nil, fmt.Errorf("generate content: %w", err)
 	}
 	if len(resp.Candidates) == 0 {
-		return nil, "", fmt.Errorf("no candidates in response")
+		return nil, fmt.Errorf("no candidates in response")
 	}
 	cand := resp.Candidates[0]
 	if cand.Content == nil {
-		return nil, "", fmt.Errorf("no content in candidate")
+		return nil, fmt.Errorf("no content in candidate")
 	}
 
 	for _, part := range cand.Content.Parts {
 		if part.InlineData == nil || len(part.InlineData.Data) == 0 {
 			continue
 		}
-		data := part.InlineData.Data
-		return data, sniffImageMime(data), nil
+		return part.InlineData.Data, nil
 	}
-	return nil, "", fmt.Errorf("no image data in response")
-}
-
-// sniffImageMime returns a best-guess image MIME type from the magic bytes,
-// defaulting to "image/png" if nothing matches.
-func sniffImageMime(data []byte) string {
-	switch {
-	case len(data) >= 8 && data[0] == 0x89 && data[1] == 'P' && data[2] == 'N' && data[3] == 'G' &&
-		data[4] == 0x0D && data[5] == 0x0A && data[6] == 0x1A && data[7] == 0x0A:
-		return "image/png"
-	case len(data) >= 2 && data[0] == 0xFF && data[1] == 0xD8:
-		return "image/jpeg"
-	default:
-		return "image/png"
-	}
+	return nil, fmt.Errorf("no image data in response")
 }
 
 var jsonFenceRe = regexp.MustCompile("(?s)^\\s*```(?:json)?\\s*\n?(.*?)\n?```\\s*$")
