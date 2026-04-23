@@ -66,7 +66,7 @@ func start(ctx context.Context, log *slog.Logger, eg app.Goer) error {
 		return errors.Wrap(err, "error resolving images path")
 	}
 	log.Info("Initialised image store", "path", absImagesRoot)
-	imageStore := llm.NewImageStore(imagesRoot)
+	imageStore := llm.NewImageStore(absImagesRoot)
 
 	runner := gluejobs.NewRunner(gluejobs.NewRunnerOpts{
 		Limit: 8,

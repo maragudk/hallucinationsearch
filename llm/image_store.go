@@ -35,9 +35,13 @@ func NewImageStore(root string) *ImageStore {
 	return &ImageStore{root: root}
 }
 
-// Path returns the absolute on-disk path for the given hash. Intended for
-// logging and span attributes -- the file itself may or may not exist.
+// Path returns the on-disk path for the given hash, or an empty string if
+// the hash fails validation. Intended for logging and span attributes -- the
+// file itself may or may not exist.
 func (s *ImageStore) Path(hash string) string {
+	if !hashRe.MatchString(hash) {
+		return ""
+	}
 	return filepath.Join(s.root, hash[0:2], hash[2:4], hash[4:]+".png")
 }
 

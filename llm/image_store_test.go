@@ -78,7 +78,7 @@ func TestImageStore(t *testing.T) {
 		is.Equal(t, false, strings.Contains(entries[0].Name(), ".tmp-"))
 	})
 
-	t.Run("bad hash is rejected by Get and Put", func(t *testing.T) {
+	t.Run("bad hash is rejected by Get, Put, and Path", func(t *testing.T) {
 		root := t.TempDir()
 		s := llm.NewImageStore(root)
 
@@ -97,6 +97,8 @@ func TestImageStore(t *testing.T) {
 
 			err = s.Put(h, []byte{0x00})
 			is.True(t, err != nil)
+
+			is.Equal(t, "", s.Path(h))
 		}
 
 		// Nothing should have been written to the root.

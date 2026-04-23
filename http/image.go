@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -20,11 +19,6 @@ const (
 	// imagePathMaxBytes caps the raw URL-path length for /image/... so a truncated
 	// or hostile caller cannot blow the prompt token budget.
 	imagePathMaxBytes = 1024
-	// imageGenTimeout is the total budget for a single cache-miss generation,
-	// including the model call. The llm.Client enforces its own 60s internal
-	// timeout; we mirror it at the handler level so slow generations cannot
-	// pin the handler open.
-	imageGenTimeout = 60 * time.Second
 	// imageCacheControl tells browsers the bytes at /image/<path> are immutable
 	// (the prompt is the cache key -- regenerating with the same prompt yields
 	// a new image, but the browser is free to cache the current bytes forever).
@@ -92,10 +86,9 @@ func handleImage(log *slog.Logger, store imageStore, gen imageGenerator) http.Ha
 			return
 		}
 
-		genCtx, cancel := context.WithTimeout(ctx, imageGenTimeout)
-		defer cancel()
-
-		data, err = gen.Image(genCtx, prompt)
+		// llm.Image owns its own 60s budget; we pass the request context as-is
+		// so the generation aborts promptly when the client disconnects.
+		data, err = gen.Image(ctx, prompt)
 		if err != nil {
 			log.Error("Error generating image", "error", err, "prompt", prompt)
 			http.Error(w, "image generation failed", http.StatusBadGateway)
