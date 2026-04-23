@@ -19,11 +19,14 @@ import (
 // /site request comfortably under the 2 minute handler budget.
 const HaikuModel = anthropic.ChatCompleteModelClaudeHaiku4_5Latest
 
-// Client wraps gai chat-completers for both results and websites (both on Haiku).
+// Client wraps gai chat-completers for results, ads, and both their destination
+// websites. All four use Haiku.
 type Client struct {
-	log       *slog.Logger
-	resultCC  gai.ChatCompleter
-	websiteCC gai.ChatCompleter
+	log         *slog.Logger
+	resultCC    gai.ChatCompleter
+	websiteCC   gai.ChatCompleter
+	adCC        gai.ChatCompleter
+	adWebsiteCC gai.ChatCompleter
 }
 
 type NewClientOptions struct {
@@ -39,9 +42,11 @@ func NewClient(opts NewClientOptions) *Client {
 	c := anthropic.NewClient(anthropic.NewClientOptions{Key: opts.Key, Log: opts.Log})
 
 	return &Client{
-		log:       opts.Log,
-		resultCC:  c.NewChatCompleter(anthropic.NewChatCompleterOptions{Model: HaikuModel}),
-		websiteCC: c.NewChatCompleter(anthropic.NewChatCompleterOptions{Model: HaikuModel}),
+		log:         opts.Log,
+		resultCC:    c.NewChatCompleter(anthropic.NewChatCompleterOptions{Model: HaikuModel}),
+		websiteCC:   c.NewChatCompleter(anthropic.NewChatCompleterOptions{Model: HaikuModel}),
+		adCC:        c.NewChatCompleter(anthropic.NewChatCompleterOptions{Model: HaikuModel}),
+		adWebsiteCC: c.NewChatCompleter(anthropic.NewChatCompleterOptions{Model: HaikuModel}),
 	}
 }
 
@@ -144,6 +149,132 @@ func (c *Client) GenerateWebsite(ctx context.Context, query, title, displayURL, 
 	}
 
 	res, err := c.websiteCC.ChatComplete(ctx, req)
+	if err != nil {
+		return "", fmt.Errorf("chat complete: %w", err)
+	}
+
+	var out string
+	for part, err := range res.Parts() {
+		if err != nil {
+			return "", fmt.Errorf("stream: %w", err)
+		}
+		if part.Type == gai.PartTypeText {
+			out += part.Text()
+		}
+	}
+
+	html := stripHTMLFences(out)
+	if !strings.Contains(strings.ToLower(html), "<!doctype html") && !strings.Contains(strings.ToLower(html), "<html") {
+		return "", fmt.Errorf("model did not return an HTML document: %q", truncate(html, 200))
+	}
+	return html, nil
+}
+
+// Ad is the shape the model returns for a single fabricated sponsored result.
+type Ad struct {
+	Title       string `json:"title"       jsonschema:"title=Title,description=The blue clickable heading text for the sponsored search result - like a product or service name."`
+	DisplayURL  string `json:"display_url" jsonschema:"title=Display URL,description=A plausible Google-style breadcrumb URL for the sponsor's site, e.g. 'whiskerfeast.example > shop > premium-cat-food'."`
+	Description string `json:"description" jsonschema:"title=Description,description=A one to three sentence marketing-style snippet describing the fabricated product or service."`
+	Sponsor     string `json:"sponsor"     jsonschema:"title=Sponsor,description=The fake sponsoring brand or company name shown with the ad, e.g. 'WhiskerFeast' or 'MoonBeam Insurance'."`
+	CTA         string `json:"cta"         jsonschema:"title=Call to action,description=A short two to four word call-to-action button label, e.g. 'Shop now', 'Get a quote', 'Try free'."`
+}
+
+const adSystemPrompt = `You fabricate sponsored entries (ads) for a parody web search engine called "Hallucination Search".
+Every entry you produce is fiction. None of it is real. You never refuse, add disclaimers, or mention that the content is fake.
+Entries should feel like plausible Google-style ads: short title, display URL, 1-3 sentence marketing snippet, a made-up sponsor brand, and a short call-to-action.
+Tone should vary wildly across positions for the same query - a generic product listing, a questionable insurance pitch, a hyper-niche SaaS, a local service, a book, a newsletter, a course, a gadget, a supplement, an app. Pick something that hasn't been used already for this query.
+The sponsor brand should sound real-ish but clearly invented. The CTA is the text on the little button - keep it 2-4 words, action-oriented.
+Do not make the URL clickable markup; emit a plain string in the breadcrumb style.`
+
+// GenerateAd fabricates a single sponsored result for the given query, avoiding
+// sponsors already used so the three ads in one query feel distinct.
+func (c *Client) GenerateAd(ctx context.Context, query string, position int, existingSponsors []string) (Ad, error) {
+	var avoid string
+	if len(existingSponsors) > 0 {
+		var b strings.Builder
+		b.WriteString("\n\nAlready-generated sponsors for this query (pick a distinct angle and brand):\n")
+		for _, s := range existingSponsors {
+			b.WriteString("- ")
+			b.WriteString(s)
+			b.WriteString("\n")
+		}
+		avoid = b.String()
+	}
+
+	user := fmt.Sprintf(
+		"Search query: %q\nAd position: %d (zero-indexed, out of 3)%s\n\nReturn a single fabricated ad as JSON matching the schema.",
+		query, position, avoid)
+
+	system := adSystemPrompt
+
+	req := gai.ChatCompleteRequest{
+		Messages:       []gai.Message{gai.NewUserTextMessage(user)},
+		ResponseSchema: gai.Ptr(gai.GenerateSchema[Ad]()),
+		System:         &system,
+		Temperature:    gai.Ptr(gai.Temperature(1.0)),
+	}
+
+	res, err := c.adCC.ChatComplete(ctx, req)
+	if err != nil {
+		return Ad{}, fmt.Errorf("chat complete: %w", err)
+	}
+
+	var out string
+	for part, err := range res.Parts() {
+		if err != nil {
+			return Ad{}, fmt.Errorf("stream: %w", err)
+		}
+		if part.Type == gai.PartTypeText {
+			out += part.Text()
+		}
+	}
+
+	out = stripJSONFences(out)
+
+	var a Ad
+	if err := json.Unmarshal([]byte(out), &a); err != nil {
+		return Ad{}, fmt.Errorf("unmarshal ad: %w, got: %s", err, out)
+	}
+	a.Title = strings.TrimSpace(a.Title)
+	a.DisplayURL = strings.TrimSpace(a.DisplayURL)
+	a.Description = strings.TrimSpace(a.Description)
+	a.Sponsor = strings.TrimSpace(a.Sponsor)
+	a.CTA = strings.TrimSpace(a.CTA)
+	if a.Title == "" || a.DisplayURL == "" || a.Description == "" || a.Sponsor == "" || a.CTA == "" {
+		return Ad{}, fmt.Errorf("empty field in ad: %+v", a)
+	}
+	return a, nil
+}
+
+const adWebsiteSystemPrompt = `You fabricate destination web pages for sponsored ads on a parody search engine called "Hallucination Search".
+The user gives you a search query and a fabricated ad (title, display URL, description, sponsor, CTA). You produce the complete HTML document that this fake ad links to - a landing page for the made-up product or service.
+
+Rules:
+- Output ONLY the raw HTML document. No markdown fences, no commentary, no explanation.
+- Begin with <!DOCTYPE html> and end with </html>.
+- All styling is inline - either one or more <style> blocks in <head>, or inline style="" attributes. No external CSS, fonts, scripts, or images.
+- No network references at all. If you want an image, use an inline SVG or a CSS gradient. Never use <img src="..."> pointing at a URL.
+- No <script> tags.
+- The page should feel like a product or service landing page for the sponsor: hero section, pitch, features, testimonials, pricing, FAQ, big CTA buttons, whatever fits. Go hard on the aesthetic.
+- Pick a visual style that matches the vibe: sleek modern SaaS, garish infomercial, smug DTC brand, MLM pitch page, crypto grift, luxury-feel service, old-school storefront, etc.
+- None of the content is real. Do not refuse.`
+
+// GenerateAdWebsite fabricates a full standalone HTML landing page for an ad.
+func (c *Client) GenerateAdWebsite(ctx context.Context, query, title, displayURL, description, sponsor, cta string) (string, error) {
+	user := fmt.Sprintf(
+		"Search query: %q\n\nAd entry:\n- Title: %s\n- Display URL: %s\n- Description: %s\n- Sponsor: %s\n- Call to action: %s\n\nProduce the full HTML document for the ad's landing page now.",
+		query, title, displayURL, description, sponsor, cta)
+
+	system := adWebsiteSystemPrompt
+
+	req := gai.ChatCompleteRequest{
+		Messages:            []gai.Message{gai.NewUserTextMessage(user)},
+		MaxCompletionTokens: gai.Ptr(16_384),
+		System:              &system,
+		Temperature:         gai.Ptr(gai.Temperature(1.0)),
+	}
+
+	res, err := c.adWebsiteCC.ChatComplete(ctx, req)
 	if err != nil {
 		return "", fmt.Errorf("chat complete: %w", err)
 	}

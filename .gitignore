@@ -3,6 +3,7 @@
 /.env.test
 /.env*.local
 /.worktrees/
+/.playwright-cli/
 /app.db*
 /*.log
 /cover.out

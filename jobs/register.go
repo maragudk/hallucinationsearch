@@ -27,4 +27,7 @@ func Register(r *jobs.Runner, opts RegisterOpts) {
 	r.Register(model.JobNameGenerateResults.String(), GenerateResults(opts.Log, opts.Database, opts.Queue))
 	r.Register(model.JobNameGenerateResult.String(), GenerateResult(opts.Log, opts.Database, opts.LLM, opts.Queue))
 	r.Register(model.JobNameGenerateWebsite.String(), GenerateWebsite(opts.Log, opts.Database, opts.LLM))
+	r.Register(model.JobNameGenerateAds.String(), GenerateAds(opts.Log, opts.Database, opts.Queue))
+	r.Register(model.JobNameGenerateAd.String(), GenerateAd(opts.Log, opts.Database, opts.LLM, opts.Queue))
+	r.Register(model.JobNameGenerateAdWebsite.String(), GenerateAdWebsite(opts.Log, opts.Database, opts.LLM))
 }
