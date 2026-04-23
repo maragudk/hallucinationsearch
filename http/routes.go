@@ -10,8 +10,6 @@ import (
 
 func InjectHTTPRouter(log *slog.Logger, svc *service.Fat) func(*Router) {
 	return func(r *Router) {
-		r.Use(AddUserToContext(log, svc))
-
 		r.Group(func(r *http.Router) {
 			Search(r, log, searchServiceAdapter{searchDB: svc.DB(), queue: svc.Queue()})
 		})

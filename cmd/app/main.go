@@ -11,7 +11,6 @@ import (
 	gluehttp "maragu.dev/glue/http"
 	gluejobs "maragu.dev/glue/jobs"
 	"maragu.dev/glue/sql"
-	"maragu.dev/glue/sqlitestore"
 
 	"app/html"
 	"app/http"
@@ -76,11 +75,6 @@ func start(ctx context.Context, log *slog.Logger, eg app.Goer) error {
 		Queue:    db.H.JobsQ,
 	})
 
-	store, err := sqlitestore.New(ctx, db.H.DB.DB)
-	if err != nil {
-		return errors.Wrap(err, "error creating sqlite session store")
-	}
-
 	// Website fabrication can block the `/site/...` handler for up to ~2 minutes, so
 	// give the HTTP server a generous write timeout. The read timeout stays default.
 	server := gluehttp.NewServer(gluehttp.NewServerOptions{
@@ -90,10 +84,7 @@ func start(ctx context.Context, log *slog.Logger, eg app.Goer) error {
 		HTMLPage:           html.Page,
 		HTTPRouterInjector: http.InjectHTTPRouter(log, svc),
 		Log:                log.With("component", "http.Server"),
-		PermissionsGetter:  db,
 		SecureCookie:       env.GetBoolOrDefault("SECURE_COOKIE", true),
-		SessionStore:       store,
-		UserActiveChecker:  db,
 		WriteTimeout:       3 * time.Minute,
 	})
 

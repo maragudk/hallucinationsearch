@@ -3,12 +3,9 @@
 package service
 
 import (
-	"context"
-
 	"maragu.dev/goqite"
 
 	"app/llm"
-	"app/model"
 	"app/sqlite"
 )
 
@@ -40,10 +37,4 @@ func (f *Fat) DB() *sqlite.Database {
 // Queue returns the jobs queue for enqueueing new work.
 func (f *Fat) Queue() *goqite.Queue {
 	return f.queue
-}
-
-// GetUser satisfies the [userGetter] interface so the auth middleware keeps working
-// even though login flows are served by the reverse proxy and not this app.
-func (f *Fat) GetUser(ctx context.Context, id model.UserID) (model.User, error) {
-	return f.db.GetUser(ctx, id)
 }

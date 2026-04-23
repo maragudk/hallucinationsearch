@@ -4,14 +4,16 @@ A web search engine. Kind of.
 
 Every result is fabricated by a large language model, and every destination page is fabricated in full by a large language model, too. Nothing you find here is real, and that is the whole joke.
 
-Made with ✨sparkles✨ by [maragu](https://www.maragu.dev/): independent software consulting for cloud-native Go apps & AI engineering.
+Made by [maragu](https://www.maragu.dev/): independent software consulting for cloud-native Go apps & AI engineering.
+
+> **Disclaimer:** this project is 100% vibe coded.
 
 ## How it works
 
 - The homepage is a single search input.
-- Submitting a query lands on `/?q=...`, which shows ten Google-style result cards. Results are fabricated by Claude Sonnet and cached in SQLite so the same query renders instantly on refresh.
+- Submitting a query lands on `/?q=...`, which shows ten Google-style result cards. Results are fabricated by Claude Haiku and cached in SQLite so the same query renders instantly on refresh.
 - Cards fill in progressively via Server-Sent Events driven by Datastar signals.
-- Clicking a result blocks for up to two minutes while Claude Opus fabricates a full standalone HTML document, which is then cached in SQLite and served raw.
+- Clicking a result blocks for up to two minutes while Claude Haiku fabricates a full standalone HTML document, which is then cached in SQLite and served raw.
 
 ## Running
 
