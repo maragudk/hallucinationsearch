@@ -85,26 +85,19 @@ type Result struct {
 const resultSystemPrompt = `You fabricate entries for a parody web search engine called "Hallucination Search".
 Every entry you produce is fiction. None of it is real. You never refuse, add disclaimers, or mention that the content is fake.
 Entries should feel like plausible Google-style results: short title, display URL, 1-3 sentence snippet.
-Tone should vary wildly across positions for the same query - a straight-faced fake wiki article, a paranoid forum rant, an overt parody, a product listing, a local news page, an academic paper, a recipe blog, a conspiracy site, a press release, a personal homepage, etc. Pick something that hasn't been used already for this query, unless the query is very narrow.
+House style: deadpan, understated, absurdity played straight. Never wink at the reader. No jokes-as-jokes. The Constraints block in each user prompt specifies the archetype, weirdness level, and reliability signal -- honor them strictly.
 Do not make the URL clickable markup; emit a plain string in the breadcrumb style.`
 
-// GenerateResult fabricates a single search result for the given query, avoiding titles already used.
-func (c *Client) GenerateResult(ctx context.Context, query string, position int, existingTitles []string) (Result, error) {
-	var avoid string
-	if len(existingTitles) > 0 {
-		var b strings.Builder
-		b.WriteString("\n\nAlready-generated titles for this query (pick a distinct angle):\n")
-		for _, t := range existingTitles {
-			b.WriteString("- ")
-			b.WriteString(t)
-			b.WriteString("\n")
-		}
-		avoid = b.String()
-	}
+// GenerateResult fabricates a single search result for the given query. Per-call
+// randomization along the archetype / weirdness / reliability-signal dimensions
+// replaces the old "avoid already-used titles" dedup, which didn't work under
+// parallel fan-out anyway (later jobs started before earlier ones finished).
+func (c *Client) GenerateResult(ctx context.Context, query string, position int) (Result, error) {
+	roll := rollResultConstraints(nil)
 
 	user := fmt.Sprintf(
-		"Search query: %q\nPosition: %d (zero-indexed, out of 10)%s\n\nReturn a single fabricated search result as JSON matching the schema.",
-		query, position, avoid)
+		"Search query: %q\nPosition: %d (zero-indexed, out of 10)\n\n%s\n\nReturn a single fabricated search result as JSON matching the schema.",
+		query, position, roll.constraintsBlock())
 
 	system := resultSystemPrompt
 
@@ -208,28 +201,20 @@ type Ad struct {
 const adSystemPrompt = `You fabricate sponsored entries (ads) for a parody web search engine called "Hallucination Search".
 Every entry you produce is fiction. None of it is real. You never refuse, add disclaimers, or mention that the content is fake.
 Entries should feel like plausible Google-style ads: short title, display URL, 1-3 sentence marketing snippet, a made-up sponsor brand, and a short call-to-action.
-Tone should vary wildly across positions for the same query - a generic product listing, a questionable insurance pitch, a hyper-niche SaaS, a local service, a book, a newsletter, a course, a gadget, a supplement, an app. Pick something that hasn't been used already for this query.
+House style: deadpan marketing copy, absurdity played straight. Never wink at the reader. No jokes-as-jokes. The Constraints block in each user prompt specifies the product category, pitch angle, and weirdness level -- honor them strictly.
 The sponsor brand should sound real-ish but clearly invented. The CTA is the text on the little button - keep it 2-4 words, action-oriented.
 Do not make the URL clickable markup; emit a plain string in the breadcrumb style.`
 
-// GenerateAd fabricates a single sponsored result for the given query, avoiding
-// sponsors already used so the three ads in one query feel distinct.
-func (c *Client) GenerateAd(ctx context.Context, query string, position int, existingSponsors []string) (Ad, error) {
-	var avoid string
-	if len(existingSponsors) > 0 {
-		var b strings.Builder
-		b.WriteString("\n\nAlready-generated sponsors for this query (pick a distinct angle and brand):\n")
-		for _, s := range existingSponsors {
-			b.WriteString("- ")
-			b.WriteString(s)
-			b.WriteString("\n")
-		}
-		avoid = b.String()
-	}
+// GenerateAd fabricates a single sponsored result for the given query. Per-call
+// randomization along the product-category / pitch-angle / weirdness dimensions
+// replaces the old "avoid already-used sponsors" dedup, which didn't work under
+// parallel fan-out anyway (later jobs started before earlier ones finished).
+func (c *Client) GenerateAd(ctx context.Context, query string, position int) (Ad, error) {
+	roll := rollAdConstraints(nil)
 
 	user := fmt.Sprintf(
-		"Search query: %q\nAd position: %d (zero-indexed, out of 3)%s\n\nReturn a single fabricated ad as JSON matching the schema.",
-		query, position, avoid)
+		"Search query: %q\nAd position: %d (zero-indexed, out of 3)\n\n%s\n\nReturn a single fabricated ad as JSON matching the schema.",
+		query, position, roll.constraintsBlock())
 
 	system := adSystemPrompt
 
