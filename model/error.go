@@ -9,3 +9,9 @@ const (
 	ErrorUserInactive  = model.ErrorUserInactive
 	ErrorUserNotFound  = model.ErrorUserNotFound
 )
+
+const (
+	ErrorQueryNotFound   = Error("query not found")
+	ErrorResultNotFound  = Error("result not found")
+	ErrorWebsiteNotFound = Error("website not found")
+)

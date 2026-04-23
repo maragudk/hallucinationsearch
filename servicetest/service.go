@@ -4,9 +4,6 @@ package servicetest
 import (
 	"testing"
 
-	"maragu.dev/glue/email/postmarktest"
-	"maragu.dev/glue/s3test"
-
 	"app/service"
 	"app/sqlitetest"
 )
@@ -25,6 +22,7 @@ func WithSQLiteTestOptions(opts ...sqlitetest.NewDatabaseOption) NewFatOption {
 }
 
 // NewFat for testing, with optional options.
+// The LLM client and queue are nil; tests that need them should substitute directly.
 func NewFat(t *testing.T, opts ...NewFatOption) *service.Fat {
 	t.Helper()
 
@@ -33,9 +31,9 @@ func NewFat(t *testing.T, opts ...NewFatOption) *service.Fat {
 		opt(o)
 	}
 
+	db := sqlitetest.NewDatabase(t, o.dbOpts...)
 	return service.NewFat(service.NewFatOptions{
-		Bucket: s3test.NewBucket(t),
-		Database: sqlitetest.NewDatabase(t, o.dbOpts...),
-		Sender: postmarktest.NewSender(t),
+		Database: db,
+		Queue:    db.H.JobsQ,
 	})
 }
