@@ -52,7 +52,6 @@ func start(ctx context.Context, log *slog.Logger, eg app.Goer) error {
 	}
 
 	llmClient := llm.NewClient(llm.NewClientOptions{
-		Key:       env.GetStringOrDefault("ANTHROPIC_API_KEY", ""),
 		GoogleKey: env.GetStringOrDefault("GOOGLE_API_KEY", ""),
 		Log:       log.With("component", "llm.Client"),
 	})
