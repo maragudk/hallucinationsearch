@@ -12,6 +12,7 @@ import (
 
 	"maragu.dev/gai"
 	"maragu.dev/gai/clients/anthropic"
+	"maragu.dev/gai/robust"
 )
 
 // HaikuModel is the Anthropic model used for both result fabrication and website fabrication.
@@ -41,12 +42,19 @@ func NewClient(opts NewClientOptions) *Client {
 
 	c := anthropic.NewClient(anthropic.NewClientOptions{Key: opts.Key, Log: opts.Log})
 
+	wrap := func(inner gai.ChatCompleter) gai.ChatCompleter {
+		return robust.NewChatCompleter(robust.NewChatCompleterOptions{
+			Completers: []gai.ChatCompleter{inner},
+			Log:        opts.Log,
+		})
+	}
+
 	return &Client{
 		log:         opts.Log,
-		resultCC:    c.NewChatCompleter(anthropic.NewChatCompleterOptions{Model: HaikuModel}),
-		websiteCC:   c.NewChatCompleter(anthropic.NewChatCompleterOptions{Model: HaikuModel}),
-		adCC:        c.NewChatCompleter(anthropic.NewChatCompleterOptions{Model: HaikuModel}),
-		adWebsiteCC: c.NewChatCompleter(anthropic.NewChatCompleterOptions{Model: HaikuModel}),
+		resultCC:    wrap(c.NewChatCompleter(anthropic.NewChatCompleterOptions{Model: HaikuModel})),
+		websiteCC:   wrap(c.NewChatCompleter(anthropic.NewChatCompleterOptions{Model: HaikuModel})),
+		adCC:        wrap(c.NewChatCompleter(anthropic.NewChatCompleterOptions{Model: HaikuModel})),
+		adWebsiteCC: wrap(c.NewChatCompleter(anthropic.NewChatCompleterOptions{Model: HaikuModel})),
 	}
 }
 
