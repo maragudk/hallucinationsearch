@@ -4,7 +4,7 @@ A web search engine. Kind of.
 
 Every result is fabricated by a large language model, and every destination page is fabricated in full by a large language model, too. Nothing you find here is real, and that is the whole joke.
 
-Made by [maragu](https://www.maragu.dev/): independent software consulting for cloud-native Go apps & AI engineering.
+Made with ✨sparkles✨ by [maragu](https://www.maragu.dev/): independent software consulting for cloud-native Go apps & AI engineering.
 
 > **Disclaimer:** this project is 100% vibe coded.
 
