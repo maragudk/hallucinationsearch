@@ -85,6 +85,9 @@ func (s *ImageStore) Put(hash string, data []byte) error {
 	tmp := final + ".tmp-" + hex.EncodeToString(suffix[:])
 
 	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		// WriteFile may have created a partial file before failing (e.g. disk full).
+		// Best-effort cleanup so shard dirs don't accumulate orphaned tmp files.
+		_ = os.Remove(tmp)
 		return fmt.Errorf("write temp file: %w", err)
 	}
 
