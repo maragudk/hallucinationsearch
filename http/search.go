@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	"maragu.dev/goqite"
 
 	. "maragu.dev/gomponents"
@@ -74,11 +76,18 @@ func Search(r *Router, log *slog.Logger, svc searchService) {
 			return html.HomePage(html.HomePageProps{PageProps: props}), nil
 		}
 
+		trace.SpanFromContext(ctx).SetAttributes(
+			attribute.String("query.raw", truncate(raw, 256)),
+			attribute.String("query.text", normalised),
+		)
+
 		q, err := svc.UpsertQuery(ctx, normalised)
 		if err != nil {
 			log.Error("Error upserting query", "error", err, "query", normalised)
 			return nil, err
 		}
+
+		trace.SpanFromContext(ctx).SetAttributes(attribute.String("query.id", string(q.ID)))
 
 		if err := enqueueGenerateResults(ctx, svc.Queue(), q.ID); err != nil {
 			log.Error("Error enqueueing generate-results", "error", err, "query_id", q.ID)
@@ -97,6 +106,11 @@ func Search(r *Router, log *slog.Logger, svc searchService) {
 		if err != nil {
 			return nil, err
 		}
+
+		trace.SpanFromContext(ctx).SetAttributes(
+			attribute.Int("results.count", len(results)),
+			attribute.Int("ads.count", len(ads)),
+		)
 
 		return html.ResultsPage(html.ResultsPageProps{
 			PageProps: props,
@@ -164,6 +178,8 @@ func handleEvents(log *slog.Logger, svc searchDB) http.HandlerFunc {
 		ctx, cancel := context.WithTimeout(r.Context(), eventsMaxWait)
 		defer cancel()
 
+		trace.SpanFromContext(ctx).SetAttributes(attribute.String("query.text", normalised))
+
 		q, err := svc.GetQueryByText(ctx, normalised)
 		if err != nil {
 			// Nothing to stream -- the main page handler will have created the row,
@@ -171,8 +187,22 @@ func handleEvents(log *slog.Logger, svc searchDB) http.HandlerFunc {
 			return
 		}
 
+		trace.SpanFromContext(ctx).SetAttributes(attribute.String("query.id", string(q.ID)))
+
 		sentResults := make(map[int]bool, resultsPerQuery)
 		sentAds := make(map[int]bool, adsPerQuery)
+
+		done := func() bool {
+			return len(sentResults) >= resultsPerQuery && len(sentAds) >= adsPerQuery
+		}
+
+		defer func() {
+			trace.SpanFromContext(ctx).SetAttributes(
+				attribute.Int("events.results_sent", len(sentResults)),
+				attribute.Int("events.ads_sent", len(sentAds)),
+				attribute.Bool("events.done", done()),
+			)
+		}()
 
 		pushState := func() error {
 			rs, err := svc.GetResults(ctx, q.ID)
@@ -202,10 +232,6 @@ func handleEvents(log *slog.Logger, svc searchDB) http.HandlerFunc {
 				return nil
 			}
 			return writeSignalsPatch(w, flusher, rs, sentResults, ads, sentAds)
-		}
-
-		done := func() bool {
-			return len(sentResults) >= resultsPerQuery && len(sentAds) >= adsPerQuery
 		}
 
 		// Initial push.
@@ -335,6 +361,8 @@ func handleSite(log *slog.Logger, svc searchService) http.HandlerFunc {
 
 		ctx := r.Context()
 
+		trace.SpanFromContext(ctx).SetAttributes(attribute.String("result.id", string(id)))
+
 		res, err := svc.GetResult(ctx, id)
 		if err != nil {
 			if errors.Is(err, model.ErrorResultNotFound) {
@@ -346,8 +374,11 @@ func handleSite(log *slog.Logger, svc searchService) http.HandlerFunc {
 			return
 		}
 
+		trace.SpanFromContext(ctx).SetAttributes(attribute.String("query.id", string(res.QueryID)))
+
 		site, err := svc.GetWebsite(ctx, res.ID)
 		if err == nil {
+			trace.SpanFromContext(ctx).SetAttributes(attribute.Bool("website.cached", true))
 			writeSiteHTML(w, site.HTML)
 			return
 		}
@@ -375,6 +406,7 @@ func handleSite(log *slog.Logger, svc searchService) http.HandlerFunc {
 			case <-ticker.C:
 				site, err := svc.GetWebsite(pollCtx, res.ID)
 				if err == nil {
+					trace.SpanFromContext(ctx).SetAttributes(attribute.Bool("website.cached", false))
 					writeSiteHTML(w, site.HTML)
 					return
 				}
@@ -420,6 +452,8 @@ func handleAd(log *slog.Logger, svc searchService) http.HandlerFunc {
 
 		ctx := r.Context()
 
+		trace.SpanFromContext(ctx).SetAttributes(attribute.String("ad.id", string(id)))
+
 		a, err := svc.GetAd(ctx, id)
 		if err != nil {
 			if errors.Is(err, model.ErrorAdNotFound) {
@@ -431,8 +465,11 @@ func handleAd(log *slog.Logger, svc searchService) http.HandlerFunc {
 			return
 		}
 
+		trace.SpanFromContext(ctx).SetAttributes(attribute.String("query.id", string(a.QueryID)))
+
 		site, err := svc.GetAdWebsite(ctx, a.ID)
 		if err == nil {
+			trace.SpanFromContext(ctx).SetAttributes(attribute.Bool("ad_website.cached", true))
 			writeSiteHTML(w, site.HTML)
 			return
 		}
@@ -459,6 +496,7 @@ func handleAd(log *slog.Logger, svc searchService) http.HandlerFunc {
 			case <-ticker.C:
 				site, err := svc.GetAdWebsite(pollCtx, a.ID)
 				if err == nil {
+					trace.SpanFromContext(ctx).SetAttributes(attribute.Bool("ad_website.cached", false))
 					writeSiteHTML(w, site.HTML)
 					return
 				}
@@ -537,4 +575,13 @@ func titleToSlug(s string) string {
 		s = strings.TrimRight(s, "-")
 	}
 	return s
+}
+
+// truncate clips s to at most n bytes, for attribute values (OTel exporters
+// drop attributes that grow past ~4K, so keep span payloads small).
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n]
 }
