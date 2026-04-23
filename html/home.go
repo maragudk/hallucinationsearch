@@ -11,7 +11,7 @@ type HomePageProps struct {
 
 func HomePage(props HomePageProps) Node {
 	props.Title = "Hallucination Search"
-	props.Description = "Hallucination Search"
+	props.Description = "Nothing you see here is real."
 
 	return Page(props.PageProps,
 		Div(Class("flex flex-col items-center justify-center gap-8 py-16 md:py-24"),
