@@ -9,9 +9,12 @@ import (
 	"log/slog"
 	"regexp"
 	"strings"
+	"time"
 
+	"google.golang.org/genai"
 	"maragu.dev/gai"
 	"maragu.dev/gai/clients/anthropic"
+	"maragu.dev/gai/clients/google"
 	"maragu.dev/gai/robust"
 )
 
@@ -20,19 +23,33 @@ import (
 // /site request comfortably under the 2 minute handler budget.
 const HaikuModel = anthropic.ChatCompleteModelClaudeHaiku4_5Latest
 
+// NanoBananaModel is the Google Gemini image-generation model used to fabricate
+// inline images for the generated destination websites. v2 flash gives better
+// quality and aspect-ratio handling than v1 at comparable latency, which is
+// important for images the user actually sees rendered inside fabricated pages.
+const NanoBananaModel = "gemini-3.1-flash-image-preview"
+
+// imageTimeout caps how long a single Nano Banana generation call may run.
+const imageTimeout = 60 * time.Second
+
 // Client wraps gai chat-completers for results, ads, and both their destination
-// websites. All four use Haiku.
+// websites (all Haiku), plus the raw Google genai client used for image
+// generation via Nano Banana.
 type Client struct {
 	log         *slog.Logger
 	resultCC    gai.ChatCompleter
 	websiteCC   gai.ChatCompleter
 	adCC        gai.ChatCompleter
 	adWebsiteCC gai.ChatCompleter
+	google      *google.Client
 }
 
 type NewClientOptions struct {
+	// Key is the Anthropic API key used for all chat completions.
 	Key string
-	Log *slog.Logger
+	// GoogleKey is the Google Gemini API key used for Nano Banana image generation.
+	GoogleKey string
+	Log       *slog.Logger
 }
 
 func NewClient(opts NewClientOptions) *Client {
@@ -49,12 +66,15 @@ func NewClient(opts NewClientOptions) *Client {
 		})
 	}
 
+	gc := google.NewClient(google.NewClientOptions{Key: opts.GoogleKey, Log: opts.Log})
+
 	return &Client{
 		log:         opts.Log,
 		resultCC:    wrap(c.NewChatCompleter(anthropic.NewChatCompleterOptions{Model: HaikuModel})),
 		websiteCC:   wrap(c.NewChatCompleter(anthropic.NewChatCompleterOptions{Model: HaikuModel})),
 		adCC:        wrap(c.NewChatCompleter(anthropic.NewChatCompleterOptions{Model: HaikuModel})),
 		adWebsiteCC: wrap(c.NewChatCompleter(anthropic.NewChatCompleterOptions{Model: HaikuModel})),
+		google:      gc,
 	}
 }
 
@@ -134,8 +154,9 @@ The user gives you a search query and a fabricated search-result entry (title, d
 Rules:
 - Output ONLY the raw HTML document. No markdown fences, no commentary, no explanation.
 - Begin with <!DOCTYPE html> and end with </html>.
-- All styling is inline - either one or more <style> blocks in <head>, or inline style="" attributes. No external CSS, fonts, scripts, or images.
-- No network references at all. If you want an image, use an inline SVG or a CSS gradient. Never use <img src="..."> pointing at a URL.
+- All styling is inline - either one or more <style> blocks in <head>, or inline style="" attributes. No external CSS, fonts, or scripts.
+- Images: you MAY include 0-3 <img> tags where they genuinely fit the page vibe. Every <img> src MUST start with "/image/" followed by a short kebab-case description of the desired image (hyphen-separated words, 10-80 characters total, lowercase, ASCII). For example: <img src="/image/tabby-cat-sleeping-on-stack-of-library-books" alt="..." style="max-width:100%">. The description doubles as the generation prompt and the cache key, so make it specific and descriptive. Do not demand images on every page; include one or two only when they add to the fiction. Inline SVG and CSS gradients are still fine when you don't want a photo-like image.
+- Do NOT reference any external URLs for images, stylesheets, fonts, scripts, or anything else. No <img src="https://..."> and no <img src="http://...">. Same-origin "/image/..." is the only allowed <img> source.
 - No <script> tags.
 - Match the tone and title of the search result, then invent a fully-formed page around it - paragraphs, sections, fake navigation, fake comments, fake metadata, whatever fits.
 - Pick a visual style that matches the vibe: late-90s GeoCities, modern SaaS landing page, scrappy personal blog, fake news article, wiki entry, forum thread, product page, academic paper, conspiracy site, etc. Go hard on the aesthetic.
@@ -260,8 +281,9 @@ The user gives you a search query and a fabricated ad (title, display URL, descr
 Rules:
 - Output ONLY the raw HTML document. No markdown fences, no commentary, no explanation.
 - Begin with <!DOCTYPE html> and end with </html>.
-- All styling is inline - either one or more <style> blocks in <head>, or inline style="" attributes. No external CSS, fonts, scripts, or images.
-- No network references at all. If you want an image, use an inline SVG or a CSS gradient. Never use <img src="..."> pointing at a URL.
+- All styling is inline - either one or more <style> blocks in <head>, or inline style="" attributes. No external CSS, fonts, or scripts.
+- Images: you MAY include 0-3 <img> tags where they genuinely fit the landing page vibe (hero shot, product photo, testimonial portrait, feature illustration). Every <img> src MUST start with "/image/" followed by a short kebab-case description of the desired image (hyphen-separated words, 10-80 characters total, lowercase, ASCII). For example: <img src="/image/sleek-modern-product-hero-shot-on-white-background" alt="..." style="max-width:100%">. The description doubles as the generation prompt and the cache key, so make it specific and descriptive. Do not demand images on every page; include one or two only when they fit. Inline SVG and CSS gradients are still fine when you don't want a photo-like image.
+- Do NOT reference any external URLs for images, stylesheets, fonts, scripts, or anything else. No <img src="https://..."> and no <img src="http://...">. Same-origin "/image/..." is the only allowed <img> source.
 - No <script> tags.
 - The page should feel like a product or service landing page for the sponsor: hero section, pitch, features, testimonials, pricing, FAQ, big CTA buttons, whatever fits. Go hard on the aesthetic.
 - Pick a visual style that matches the vibe: sleek modern SaaS, garish infomercial, smug DTC brand, MLM pitch page, crypto grift, luxury-feel service, old-school storefront, etc.
@@ -302,6 +324,34 @@ func (c *Client) GenerateAdWebsite(ctx context.Context, query, title, displayURL
 		return "", fmt.Errorf("model did not return an HTML document: %q", truncate(html, 200))
 	}
 	return html, nil
+}
+
+// Image generates a single fabricated image for the given prompt via Nano Banana.
+// Returns the raw image bytes. Nano Banana returns PNG by default; the caller
+// always serves them as image/png. The call is capped at [imageTimeout].
+func (c *Client) Image(ctx context.Context, prompt string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, imageTimeout)
+	defer cancel()
+
+	resp, err := c.google.Client.Models.GenerateContent(ctx, NanoBananaModel, genai.Text(prompt), nil)
+	if err != nil {
+		return nil, fmt.Errorf("generate content: %w", err)
+	}
+	if len(resp.Candidates) == 0 {
+		return nil, fmt.Errorf("no candidates in response")
+	}
+	cand := resp.Candidates[0]
+	if cand.Content == nil {
+		return nil, fmt.Errorf("no content in candidate")
+	}
+
+	for _, part := range cand.Content.Parts {
+		if part.InlineData == nil || len(part.InlineData.Data) == 0 {
+			continue
+		}
+		return part.InlineData.Data, nil
+	}
+	return nil, fmt.Errorf("no image data in response")
 }
 
 var jsonFenceRe = regexp.MustCompile("(?s)^\\s*```(?:json)?\\s*\n?(.*?)\n?```\\s*$")

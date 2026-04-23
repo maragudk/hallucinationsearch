@@ -5,6 +5,7 @@
 /.worktrees/
 /.playwright-cli/
 /app.db*
+/images/
 /*.log
 /cover.out
 /go.work*

@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"time"
 
 	"maragu.dev/env"
@@ -50,9 +52,21 @@ func start(ctx context.Context, log *slog.Logger, eg app.Goer) error {
 	}
 
 	llmClient := llm.NewClient(llm.NewClientOptions{
-		Key: env.GetStringOrDefault("ANTHROPIC_API_KEY", ""),
-		Log: log.With("component", "llm.Client"),
+		Key:       env.GetStringOrDefault("ANTHROPIC_API_KEY", ""),
+		GoogleKey: env.GetStringOrDefault("GOOGLE_API_KEY", ""),
+		Log:       log.With("component", "llm.Client"),
 	})
+
+	imagesRoot := env.GetStringOrDefault("IMAGES_PATH", "images")
+	if err := os.MkdirAll(imagesRoot, 0o755); err != nil {
+		return errors.Wrap(err, "error creating images directory")
+	}
+	absImagesRoot, err := filepath.Abs(imagesRoot)
+	if err != nil {
+		return errors.Wrap(err, "error resolving images path")
+	}
+	log.Info("Initialised image store", "path", absImagesRoot)
+	imageStore := llm.NewImageStore(absImagesRoot)
 
 	runner := gluejobs.NewRunner(gluejobs.NewRunnerOpts{
 		Limit: 8,
@@ -70,9 +84,10 @@ func start(ctx context.Context, log *slog.Logger, eg app.Goer) error {
 	})
 
 	svc := service.NewFat(service.NewFatOptions{
-		Database: db,
-		LLM:      llmClient,
-		Queue:    db.H.JobsQ,
+		Database:   db,
+		LLM:        llmClient,
+		Queue:      db.H.JobsQ,
+		ImageStore: imageStore,
 	})
 
 	// Website fabrication can block the `/site/...` handler for up to ~2 minutes, so
