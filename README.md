@@ -6,7 +6,9 @@ Every result is fabricated by a large language model, and every destination page
 
 Made with ✨sparkles✨ by [maragu](https://www.maragu.dev/): independent software consulting for cloud-native Go apps & AI engineering.
 
-> **Disclaimer:** this project is 100% vibe coded.
+[Contact me at markus@maragu.dk](mailto:markus@maragu.dk) for consulting work, or perhaps an invoice to support this project?
+
+**Disclaimer:** this project is 100% vibe coded.
 
 ## How it works
 
@@ -28,5 +30,3 @@ make watch
 The app writes logs to `app.log`, rebuilds on file changes, and listens on the address configured by `SERVER_ADDRESS` (default `:8080`).
 
 Inspect the cache directly with `sqlite3 app.db` (remember `pragma foreign_keys = 1;`).
-
-[Contact me at markus@maragu.dk](mailto:markus@maragu.dk) for consulting work, or perhaps an invoice to support this project?
