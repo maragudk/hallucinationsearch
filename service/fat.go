@@ -3,35 +3,38 @@
 package service
 
 import (
-	"context"
+	"maragu.dev/goqite"
 
-	"maragu.dev/glue/email/postmark"
-	"maragu.dev/glue/s3"
-
-	"app/model"
+	"app/llm"
 	"app/sqlite"
 )
 
 type Fat struct {
-	bucket *s3.Bucket
-	db     *sqlite.Database
-	sender *postmark.Sender
+	db    *sqlite.Database
+	llm   *llm.Client
+	queue *goqite.Queue
 }
 
 type NewFatOptions struct {
-	Bucket *s3.Bucket
 	Database *sqlite.Database
-	Sender *postmark.Sender
+	LLM      *llm.Client
+	Queue    *goqite.Queue
 }
 
 func NewFat(opts NewFatOptions) *Fat {
 	return &Fat{
-		bucket: opts.Bucket,
-		db:     opts.Database,
-		sender: opts.Sender,
+		db:    opts.Database,
+		llm:   opts.LLM,
+		queue: opts.Queue,
 	}
 }
 
-func (f *Fat) GetUser(ctx context.Context, id model.UserID) (model.User, error) {
-	return f.db.GetUser(ctx, id)
+// DB returns the underlying [sqlite.Database] for read/write access.
+func (f *Fat) DB() *sqlite.Database {
+	return f.db
+}
+
+// Queue returns the jobs queue for enqueueing new work.
+func (f *Fat) Queue() *goqite.Queue {
+	return f.queue
 }
